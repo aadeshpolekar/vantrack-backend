@@ -4,6 +4,17 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const pool = require("../db");
+const rateLimit = require("../middleware/rateLimit");
+
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: "Too many attempts. Try again in 15 minutes." });
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 3, message: "Too many reset requests. Try again in an hour." });
+
+function isValidEmail(email) {
+  return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+function isValidPhone(phone) {
+  return typeof phone === "string" && /^\d{10}$/.test(phone.replace(/\D/g, ""));
+}
 
 const router = express.Router();
 
@@ -11,10 +22,19 @@ function sign(ownerId) {
   return jwt.sign({ ownerId }, process.env.JWT_SECRET, { expiresIn: "30d" });
 }
 
-router.post("/signup", async (req, res) => {
+router.post("/signup", authLimiter, async (req, res) => {
   const { name, vanName, email, password, phone } = req.body;
   if (!name || !vanName || !email || !password) {
     return res.status(400).json({ error: "name, vanName, email and password are required" });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "Enter a valid email address" });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+  if (phone && !isValidPhone(phone)) {
+    return res.status(400).json({ error: "Phone number must be 10 digits" });
   }
   try {
     const existing = await pool.query("SELECT id FROM owners WHERE email = $1", [email.toLowerCase()]);
@@ -35,9 +55,12 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "email and password are required" });
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "Enter a valid email address" });
+  }
   try {
     const result = await pool.query("SELECT * FROM owners WHERE email = $1", [email.toLowerCase()]);
     const owner = result.rows[0];
@@ -56,7 +79,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", forgotLimiter, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "email is required" });
   try {
@@ -80,6 +103,7 @@ router.post("/forgot-password", async (req, res) => {
           port: Number(process.env.SMTP_PORT || 587),
           secure: false,
           auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+          family: 4,
         });
         await transporter.sendMail({
           from: process.env.SMTP_FROM,
@@ -102,6 +126,9 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) return res.status(400).json({ error: "token and newPassword are required" });
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
   try {
     const result = await pool.query(
       "SELECT id FROM owners WHERE reset_token = $1 AND reset_token_expires > now()",
