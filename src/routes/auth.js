@@ -4,10 +4,9 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const pool = require("../db");
-const rateLimit = require("../middleware/rateLimit");
-
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: "Too many attempts. Try again in 15 minutes." });
-const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 3, message: "Too many reset requests. Try again in an hour." });
+const ratelimit = require("../middleware/ratelimit");
+const authLimiter = ratelimit({ windowMs: 15 * 60 * 1000, max: 10, message: "Too many attempts. Try again in 15 minutes." });
+const forgotLimiter = ratelimit({ windowMs: 60 * 60 * 1000, max: 3, message: "Too many reset requests. Try again in an hour." });
 
 function isValidEmail(email) {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
